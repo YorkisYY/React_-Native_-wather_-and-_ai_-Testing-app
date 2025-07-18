@@ -1,7 +1,4 @@
-
-
-import { useState, useEffect, useRef } from 'react';
-
+import React, { useState, useEffect } from 'react';
 
 const useTypewriter = (fullText: string, speed: number = 200) => {
   const [displayedText, setDisplayedText] = useState('');
@@ -27,14 +24,12 @@ const useTypewriter = (fullText: string, speed: number = 200) => {
     }
   }, [currentWordIndex, fullText, speed]);
 
-
   const reset = () => {
     setDisplayedText('');
     setCurrentWordIndex(0);
   };
 
   useEffect(() => {
-
     reset();
   }, [fullText]);
 
@@ -52,61 +47,129 @@ export const useSpeechAIIntegration = () => {
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [aiError, setAiError] = useState<string>('');
   const [isAiConnected, setIsAiConnected] = useState(false);
-  
-
   const [fullResponseText, setFullResponseText] = useState<string>('');
-  
 
   const { displayedText, isTyping, reset, progress } = useTypewriter(fullResponseText, 200);
 
-
   const WATSON_AI_CONFIG = {
     baseUrl: 'https://eu-gb.ml.cloud.ibm.com',
-    apiKey: 'AW3LKng2gEmIyQQKt_t_HrptkOUYohh6-Hj_PXKJZQ9E',
-    deploymentId: 'ef2426cc-6550-4f32-8e1a-c091339dc58e'
+    apiKey: '9hZtqy6PhM-zml8zuEAkfUihkHECwQSRVQApdrx7vToz',
+    deploymentId: '331b85e6-8e2c-4af2-81b4-04baaf115dba'
   };
-
 
   const getIAMToken = async () => {
     const response = await fetch('https://iam.cloud.ibm.com/identity/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
       },
-      body: new URLSearchParams({
-        'grant_type': 'urn:ibm:params:oauth:grant-type:apikey',
-        'apikey': WATSON_AI_CONFIG.apiKey
-      }).toString()
+      body: `grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=${WATSON_AI_CONFIG.apiKey}`
     });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get IAM token: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
     const data = await response.json();
+    
+    if (!data.access_token) {
+      throw new Error(`No access token in IAM response: ${JSON.stringify(data)}`);
+    }
+    
     return data.access_token;
   };
 
-
   const callNormalAI = async (text: string) => {
     const token = await getIAMToken();
+    
     const url = `${WATSON_AI_CONFIG.baseUrl}/ml/v4/deployments/${WATSON_AI_CONFIG.deploymentId}/ai_service?version=2021-05-01`;
+    
+    // 使用官方格式
+    const requestBody = {
+      "messages": [
+        {
+          "content": text,
+          "role": "user"
+        }
+      ]
+    };
+
+    console.log('發送的請求體:', JSON.stringify(requestBody, null, 2));
+    console.log('請求 URL:', url);
     
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        messages: [{ content: text, role: "user" }]
-      })
+      body: JSON.stringify(requestBody)
     });
 
-    const data = await response.json();
-    
-    if (data.choices && data.choices[0] && data.choices[0].message) {
-      return data.choices[0].message.content;
+    console.log('響應狀態:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('錯誤響應內容:', errorText);
+      throw new Error(`HTTP Error: ${response.status} ${response.statusText} - ${errorText}`);
     }
-    return 'No response';
+
+    const data = await response.json();
+    console.log('Watson AI 完整響應:', JSON.stringify(data, null, 2));
+    
+    return parseResponse(data);
   };
 
+  const parseResponse = (data: any): string => {
+    console.log('解析響應數據:', JSON.stringify(data, null, 2));
+    
+    // 聊天響應格式
+    if (data.choices && data.choices[0]) {
+      const choice = data.choices[0];
+      if (choice.message && choice.message.content) {
+        return choice.message.content;
+      }
+      if (choice.text) {
+        return choice.text;
+      }
+    }
+    
+    // 生成式 AI 響應
+    if (data.results && data.results[0]) {
+      return data.results[0].generated_text || data.results[0];
+    }
+    
+    // 直接文本響應
+    if (typeof data === 'string') {
+      return data;
+    }
+    
+    // 其他可能的格式
+    if (data.generated_text) {
+      return data.generated_text;
+    }
+    
+    if (data.result) {
+      return data.result;
+    }
+    
+    if (data.response) {
+      return data.response;
+    }
+    
+    if (data.content) {
+      return data.content;
+    }
+    
+    if (data.text) {
+      return data.text;
+    }
+    
+    throw new Error(`無法解析響應格式: ${JSON.stringify(data)}`);
+  };
 
   const sendTextToAIStream = async (text: string): Promise<void> => {
     if (!text || text.trim().length === 0) {
@@ -119,7 +182,6 @@ export const useSpeechAIIntegration = () => {
     setIsProcessingAI(true);
     setAiError('');
     
-
     reset();
     setFullResponseText('');
     setAiResponse('');
@@ -127,13 +189,11 @@ export const useSpeechAIIntegration = () => {
     try {
       console.log('Getting AI response...');
       
-
       const fullResponse = await callNormalAI(text);
       
       console.log('Got full response, starting typewriter effect...');
       console.log('Response length:', fullResponse.length);
       
-
       setFullResponseText(fullResponse);
       setAiResponse(fullResponse);
       
@@ -149,7 +209,6 @@ export const useSpeechAIIntegration = () => {
       setIsProcessingAI(false);
     }
   };
-
 
   const sendTextToAI = async (text: string): Promise<void> => {
     if (!text || text.trim().length === 0) {
@@ -183,18 +242,17 @@ export const useSpeechAIIntegration = () => {
 
       const response = await callNormalAI('Hello, please introduce yourself.');
       
-      if (response) {
+      if (response && response.trim().length > 0) {
         const testMessage = `Watson AI connection successful!\n\n${response}`;
         setAiResponse(testMessage);
         setFullResponseText(testMessage);
         setIsAiConnected(true);
         return `SUCCESS - ${response}`;
       } else {
-        setAiError('Test failed');
-        setIsAiConnected(false);
-        return 'FAILED - No response';
+        throw new Error('Empty response from Watson AI');
       }
     } catch (error) {
+      console.error('Watson AI test failed:', error);
       const errorMsg = `FAILED - ${error.message}`;
       setAiError(errorMsg);
       setIsAiConnected(false);
@@ -209,7 +267,6 @@ export const useSpeechAIIntegration = () => {
     sendTextToAI,
     testWatsonAI,
     
-
     aiResponse: displayedText, 
     aiResponseFull: aiResponse, 
     isTyping, 
