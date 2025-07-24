@@ -1,3 +1,4 @@
+// src/screens/HomeScreen.tsx - 简化版本（仅Expo Camera）
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -8,13 +9,16 @@ import {
   TouchableOpacity, 
   Alert,
   TextInput,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal,
+  Platform
 } from 'react-native';
-import VoiceButton from '../components/voice/VoiceButton';
 import WeatherCard from '../components/weather/WeatherCard';
+import ExpoCameraAR from '../components/ar/ExpoCameraAR';
 import { useWatsonWebSocket } from '../hooks/useWatsonWebSocket';
 import { useWeather } from '../hooks/useWeather';
 import { useSpeechAIIntegration } from '../hooks/useSpeechAIIntegration.ts';
+import { usePet } from '../hooks/usePet';
 import VoiceVisualizer from '../components/voice/VoiceVisualizer';
 
 export default function HomeScreen() {
@@ -40,14 +44,46 @@ export default function HomeScreen() {
     aiError,
     isAiConnected,
     sendTextToAIStream,
-    sendTextToAI,
     testWatsonAI,
     clearAIResults
   } = useSpeechAIIntegration();
 
+  // 寵物狀態管理
+  const {
+    petStatus,
+    setPetState,
+    petSpeak,
+    petListen,
+    petThink,
+    getPetStatusDescription,
+    isListening: petIsListening,
+    isThinking: petIsThinking,
+    isSpeaking: petIsSpeaking,
+  } = usePet();
+
+  // AR 狀態
+  const [isARMode, setIsARMode] = useState(false);
   const [isVoiceConnected, setIsVoiceConnected] = useState(false);
   const [inputText, setInputText] = useState('');
+  const [arDebugInfo, setArDebugInfo] = useState('AR not started');
 
+  // 同步語音狀態到寵物
+  useEffect(() => {
+    if (isListening) {
+      petListen();
+    } else if (isProcessing) {
+      petThink();
+    }
+  }, [isListening, isProcessing]);
+
+  // 同步 AI 狀態到寵物
+  useEffect(() => {
+    if (isProcessingAI) {
+      petThink();
+    } else if (isTyping || aiResponse) {
+      petSpeak();
+    }
+  }, [isProcessingAI, isTyping, aiResponse]);
 
   const handleVoicePress = async () => {
     if (isListening) {
@@ -59,14 +95,10 @@ export default function HomeScreen() {
 
   const handleTestConnection = async () => {
     const result = await testWebSocketConnection();
-    console.log('WebSocket Test Result:', result);
-    
     const isSuccess = result && result.includes('SUCCESS');
     setIsVoiceConnected(isSuccess);
-    
     Alert.alert('Watson WebSocket Test', result);
   };
-
 
   const handleTestAiConnection = async () => {
     try {
@@ -84,6 +116,7 @@ export default function HomeScreen() {
     }
 
     try {
+      petThink();
       await sendTextToAIStream(inputText);
       setInputText('');
     } catch (error) {
@@ -94,13 +127,29 @@ export default function HomeScreen() {
   const handleClearChat = () => {
     setInputText('');
     clearAIResults();
+    setPetState('idle');
+  };
+
+  const handleStartAR = () => {
+    setIsARMode(true);
+    setArDebugInfo('AR Mode Started');
+  };
+
+  const handleARDebugInfo = (info: string) => {
+    setArDebugInfo(info);
+  };
+
+  const handleExitAR = () => {
+    setIsARMode(false);
+    setArDebugInfo('AR Mode Exited');
+    setPetState('idle');
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-        <Text style={styles.title}>AI Weather Art</Text>
-        <Text style={styles.subtitle}>Powered by Watsonx WebSocket</Text>
+        <Text style={styles.title}>AI Pet Assistant</Text>
+        <Text style={styles.subtitle}>Your AI companion with Camera AR!</Text>
         
         <WeatherCard 
           weather={weather}
@@ -134,23 +183,28 @@ export default function HomeScreen() {
 
           <View style={styles.responseSection}>
             <Text style={styles.responseLabel}>
-              AI Response: {isTyping ? 'Typing...' : 'Ready'}
+              AI Response: {isTyping ? 'Pet is speaking...' : 'Ready'}
+              {isARMode && <Text style={styles.arIndicator}> (AR Pet will react)</Text>}
             </Text>
             <View style={styles.responseBox}>
               {isProcessingAI ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="small" color="#007bff" />
-                  <Text style={styles.loadingText}>AI is thinking...</Text>
+                  <Text style={styles.loadingText}>
+                    {isARMode ? 'AR pet is thinking...' : 'AI is thinking...'}
+                  </Text>
                 </View>
               ) : aiError ? (
                 <Text style={styles.errorText}>Error: {aiError}</Text>
               ) : aiResponse ? (
                 <Text style={styles.responseText}>
-                  {aiResponse}
+                  🐕: {aiResponse}
                   {isTyping && <Text style={styles.cursor}>|</Text>}
                 </Text>
               ) : (
-                <Text style={styles.placeholderText}>Waiting for AI response...</Text>
+                <Text style={styles.placeholderText}>
+                  {isARMode ? 'Your AR pet is waiting...' : 'Talk to your AI assistant...'}
+                </Text>
               )}
             </View>
           </View>
@@ -160,7 +214,7 @@ export default function HomeScreen() {
               style={styles.textInput}
               value={inputText}
               onChangeText={setInputText}
-              placeholder="Enter message for AI..."
+              placeholder={isARMode ? "Talk to your AR pet..." : "Talk to your AI assistant..."}
               multiline
               maxLength={500}
               editable={!isProcessingAI}
@@ -214,27 +268,34 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.responseSection}>
-            <Text style={styles.responseLabel}>Voice Transcription:</Text>
+            <Text style={styles.responseLabel}>
+              Voice Transcription:
+              {isARMode && <Text style={styles.arIndicator}> (AR Pet will listen)</Text>}
+            </Text>
             <View style={styles.responseBox}>
               {isProcessing ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="small" color="#007bff" />
-                  <Text style={styles.loadingText}>Processing your voice...</Text>
+                  <Text style={styles.loadingText}>
+                    {isARMode ? 'AR pet is listening...' : 'Processing your voice...'}
+                  </Text>
                 </View>
               ) : transcribedText ? (
-                <Text style={styles.responseText}>{transcribedText}</Text>
+                <Text style={styles.responseText}>🎤: {transcribedText}</Text>
               ) : (
-                <Text style={styles.placeholderText}>Waiting for voice input...</Text>
+                <Text style={styles.placeholderText}>
+                  {isARMode ? 'Speak to your AR pet...' : 'Speak to your assistant...'}
+                </Text>
               )}
             </View>
           </View>
           
           <Text style={styles.statusMessage}>
             {isListening 
-              ? `Recording... ${formatDuration(recordingDuration)} / ${formatDuration(maxRecordingTime)}` 
+              ? `${isARMode ? 'AR Pet listening... ' : 'Recording... '}${formatDuration(recordingDuration)} / ${formatDuration(maxRecordingTime)}` 
               : isProcessing
-              ? 'Processing your voice via WebSocket...'
-              : 'Ready to record (Max: 5 minutes)'
+              ? `${isARMode ? 'AR Pet processing...' : 'Processing your voice...'}`
+              : `${isARMode ? 'AR Pet ready to listen' : 'Ready to record'}`
             }
           </Text>
 
@@ -274,7 +335,48 @@ export default function HomeScreen() {
             onClear={clearTranscription}
           />
         </View>
+
+        {/* AR Section */}
+        <View style={styles.arSection}>
+          <Text style={styles.sectionTitle}>AR Pet Experience</Text>
+          
+          <TouchableOpacity 
+            style={[styles.arButton, { opacity: isARMode ? 0.7 : 1 }]}
+            onPress={handleStartAR}
+            disabled={isARMode}
+          >
+            <Text style={styles.arButtonText}>
+              {isARMode ? 'AR Running...' : 'Launch AR Pet'}
+            </Text>
+          </TouchableOpacity>
+          
+          {isARMode && (
+            <TouchableOpacity 
+              style={styles.arStopButton}
+              onPress={handleExitAR}
+            >
+              <Text style={styles.arStopButtonText}>Exit AR</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
+
+      {/* AR 全屏模態 - 仅使用Expo Camera */}
+      <Modal 
+        visible={isARMode} 
+        animationType="fade" 
+        presentationStyle="fullScreen"
+        onRequestClose={handleExitAR}
+      >
+        <ExpoCameraAR
+          isListening={petIsListening}
+          isSpeaking={petIsSpeaking}
+          isThinking={petIsThinking}
+          petStatus={petStatus}
+          onExit={handleExitAR}
+          onDebugInfo={handleARDebugInfo}
+        />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -403,6 +505,11 @@ const styles = StyleSheet.create({
     color: '#adb5bd',
     fontStyle: 'italic',
   },
+  arIndicator: {
+    fontSize: 12,
+    color: '#007bff',
+    fontWeight: '600',
+  },
   inputSection: {
     marginBottom: 10,
   },
@@ -451,5 +558,57 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '400',
     marginVertical: 15,
+  },
+  arSection: {
+    width: '100%',
+    marginVertical: 15,
+    padding: 25,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 2,
+    borderColor: '#007bff',
+    alignItems: 'center',
+  },
+  arDescription: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  arButton: {
+    backgroundColor: '#007bff',
+    paddingVertical: 18,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#007bff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    marginBottom: 15,
+  },
+  arButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  arStopButton: {
+    backgroundColor: '#dc3545',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 20,
+  },
+  arStopButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
